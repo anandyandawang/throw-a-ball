@@ -80,10 +80,10 @@ CSS armor for violent swinging: `overscroll-behavior: none`, `touch-action: none
 One canonical ready hold, and a big **sync** button on the phone page that (re)captures it:
 
 - Right hand, arm relaxed at your side, body facing the target.
-- Screen faces inward toward your leg; camera faces outward.
+- Screen faces inward toward your leg, away from your hand; the camera side sits in your palm.
 - Phone upside-down: top edge toward the ground.
 
-Tapping **sync** snapshots the current orientation as `q_ref`, which by definition means "right hand at side, player facing the target". Because the hold is canonical, the device→hand axis mapping is a fixed constant: the phone's long axis runs along the arm (top edge down = fingertips), the screen normal points into the body, the camera side is the back of the hand. Gravity at the snapshot sanity-checks the hold — if the phone doesn't read roughly top-down, the page says "hold it upside-down at your side and re-sync" instead of accepting a garbage reference. Facing the target while tapping sync is what defines forward; the sensors cannot know it any other way.
+Tapping **sync** snapshots the current orientation as `q_ref`, which by definition means "right hand at side, player facing the target". Because the hold is canonical, the device→hand axis mapping is a fixed constant: the phone's long axis runs along the arm (top edge down = fingertips), the screen faces where the palm faces, and the camera side sits against the palm — the phone stands in for the ball in the hand. Gravity at the snapshot sanity-checks the hold — if the phone doesn't read roughly top-down, the page says "hold it upside-down at your side and re-sync" instead of accepting a garbage reference. Facing the target while tapping sync is what defines forward; the sensors cannot know it any other way.
 
 Re-sync any time (drift, walked around, new stance) — it's one tap. The between-throw ZUPT still auto-corrects slow yaw drift against the last sync. The snapshot persists per device in `localStorage`. Left-handed mode is a mirrored toggle, post-MVP.
 

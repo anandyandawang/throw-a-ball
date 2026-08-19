@@ -23,6 +23,7 @@ A browser-only, phone-as-the-ball pitching trainer. The desktop browser shows a 
 ```
 /index.html          desktop game page
 /js/                 desktop game modules (scene, ball flight, hud, pairing)
+/js/input/           HandInput port + adapters (phone, replay, scripted)
 /phone/index.html    phone controller page
 /phone/js/           sensor capture, fusion, release detection, connection
 /shared/protocol.js  message types + payload shapes imported by both pages
@@ -75,6 +76,18 @@ CSS armor for violent swinging: `overscroll-behavior: none`, `touch-action: none
 
 ## 5. Desktop page
 
+### 5.1 HandInput port
+
+The game consumes hand input only through a `HandInput` port: an event source emitting `pose` (quaternion, hand-speed proxy, timestamp) and `throw` (direction, speed, metadata) — exactly the wire protocol's shapes. Adapters implement it; the scene, ball flight, and HUD never know which one is plugged in:
+
+- **`PhoneAdapter`** — the real thing, wraps the PeerJS connection.
+- **`ReplayAdapter`** — plays `/fixtures/` traces on a timer; deterministic, drives CI and headless demo recordings.
+- **`ScriptedAdapter`** — procedural swings and throws (parameterized speed/direction), plus mouse-drag control; used for development without a phone and for automated iterative testing.
+
+Selected via query param: `?input=phone|replay|scripted` (default `phone`).
+
+### 5.2 Scene and gameplay
+
 - **Scene**: `PerspectiveCamera` at the pitcher's position, ground plane, ringed target board at regulation-ish distance, visible arm/hand holding a ball, sky/fog for depth. Lighting: ambient + one directional.
 - **Hand rendering**: apply the streamed quaternion to the arm rig; hold-last-value with ≤ 50 ms slerp extrapolation from the last gyro rate. Convert device orientation with the proper quaternion math (vendor the old `DeviceOrientationControls` conversion), never raw Euler angles.
 - **Ball flight**: on a `throw` message, spawn the ball at the hand with the received velocity; per-frame `v.y -= g·dt; pos += v·dt`, optional drag later. Hit test: sphere-vs-target-plane distance plus a swept raycast from previous to current position so fast balls can't tunnel through the board.
@@ -97,7 +110,7 @@ Each milestone ends runnable and demoed with a short screen recording (headless 
 ## 7. Testing strategy
 
 - The whole phone pipeline (fusion, integrators, state machine) is pure functions of `(sample, state) → state`; unit-test them against `/fixtures/` traces: real recorded throws (strong, weak, sidearm), non-throws (walking, pocket, hand-off), and clipped-sensor throws.
-- A desktop **sim mode** (`?sim=1`) replays fixtures or maps mouse drags to fake poses, so the game is developable and CI-testable with no phone.
+- The `HandInput` adapters (§5.1) make the game runnable with no phone: `ReplayAdapter` for deterministic CI runs and headless demo video capture, `ScriptedAdapter` for interactive development and parameterized throw sweeps.
 - Manual device matrix per milestone: one iPhone (Safari), one Android (Chrome).
 
 ## 8. Risks

@@ -38,7 +38,7 @@ Both pages deploy under one origin (`<user>.github.io/throw-a-ball/` and `.../ph
 PeerJS `DataConnection` opened with `{ reliable: false, serialization: "none" }` (unordered, unreliable — stale pose packets drop instead of queueing). Two message kinds:
 
 - **`pose`** (~60 Hz, binary `Float32Array`): orientation quaternion (4), hand-speed proxy (1), sequence number (1), phone timestamp (1). Desktop drops any packet older than the last one rendered.
-- **`throw`** (discrete, sent 3× for loss-resistance with a dedupe id, or over a second reliable channel): release direction unit vector (world frame), release speed (m/s), peak hand speed, swing duration, release timestamp.
+- **`throw`** (discrete, sent 3× for loss-resistance with a dedupe id, or over a second reliable channel): release direction unit vector (world frame), release speed (m/s), spin vector (rad/s, world frame — the phone's angular velocity at the release sample), peak hand speed, swing duration, release timestamp.
 
 Plus JSON control messages on connect: `hello` (version check), `ping`/`pong` (latency display), `reset`.
 
@@ -72,7 +72,8 @@ CSS armor for violent swinging: `overscroll-behavior: none`, `touch-action: none
 3. **Hand velocity**: leaky integrator (`λ ≈ 0.98`) over high-passed world acceleration, plus the low-noise tangential proxy `v_t = |ω| × L_arm`. Zero-velocity update: when accel and gyro magnitudes stay under rest thresholds for ~120 ms, force `v = 0` and re-zero yaw.
 4. **Hand pose for rendering**: forward kinematics off orientation only — fixed shoulder anchor, virtual forearm `L_arm ≈ 0.3 m`, `p_hand = p_shoulder + R(q)·(0,0,−L)`. Integrated position is at most a 10–20 % garnish on top; never the primary driver (double integration drifts meters within a second).
 5. **Release state machine**: `IDLE → SWINGING` when world linear accel exceeds ~15 m/s² for 2–3 consecutive samples. During `SWINGING`, record the running peak sample (quaternion, velocity, timestamp). `SWINGING → RELEASED` when speed drops 3–5 % below peak for 2 consecutive samples, swing lasted ≥ 80 ms, and peak exceeded a minimum-throw floor. **Compute the throw from the recorded peak sample**, not the detection sample (detection lags the true peak by 1–3 frames). This mirrors real biomechanics: pitchers release essentially at peak hand speed, and peak timing is consistent across skill levels — only magnitude differs, so thresholds are fixed and gain carries the skill signal.
-6. **Throw vector**: direction = normalized hand-velocity direction at peak (blend toward the device-pointing axis when confidence is low); speed = calibrated monotone mapping from clamped peak hand speed (~0.5–10 m/s measured) to game ball speed (~20–45 m/s), tuned by playtesting rather than lever-arm math.
+6. **Throw vector**: direction = normalized hand-velocity direction at peak (blend toward the device-pointing axis when confidence is low); speed = calibrated monotone mapping from clamped peak hand speed (~0.5–10 m/s measured) to game ball speed (~20–45 m/s), tuned by playtesting rather than lever-arm math. Spin = the gyro's angular velocity at the release sample, rotated to world frame, scaled by its own playtested gain (a phone wrist snap peaks well below real ball rpm, and consumer gyros clip near ±2000°/s — clipped reads count as max spin).
+7. **Release feedback**: the instant the state machine fires, the phone vibrates (`navigator.vibrate(40)`) — Android only; iOS Safari has no vibration API, so the phone page flashes there instead. Because release detection runs on the phone, the buzz is zero-latency.
 
 ## 5. Desktop page
 
@@ -90,7 +91,7 @@ Selected via query param: `?input=phone|replay|scripted` (default `phone`).
 
 - **Scene**: `PerspectiveCamera` at the pitcher's position, ground plane, ringed target board at regulation-ish distance, visible arm/hand holding a ball, sky/fog for depth. Lighting: ambient + one directional.
 - **Hand rendering**: apply the streamed quaternion to the arm rig; hold-last-value with ≤ 50 ms slerp extrapolation from the last gyro rate. Convert device orientation with the proper quaternion math (vendor the old `DeviceOrientationControls` conversion), never raw Euler angles.
-- **Ball flight**: on a `throw` message, spawn the ball at the hand with the received velocity; per-frame `v.y -= g·dt; pos += v·dt`, optional drag later. Hit test: sphere-vs-target-plane distance plus a swept raycast from previous to current position so fast balls can't tunnel through the board.
+- **Ball flight**: on a `throw` message, spawn the ball at the hand with the received velocity and spin; per-frame semi-implicit Euler integrating gravity, quadratic air drag (`F_d = −½·ρ·C_d·A·|v|·v`, baseball `C_d ≈ 0.35`), and Magnus lift from the spin vector (`F_m ∝ ω × v`, spin decaying a few % per second) — so backspin carries, sidespin tails, and a floppy release sinks. Hit test: sphere-vs-target-plane distance plus a swept raycast from previous to current position so fast balls can't tunnel through the board.
 - **Feed loop**: after each throw resolves (hit, miss, or ground), a new ball appears in the hand ~1 s later. Score rings on the target; hit/miss flash.
 - **HUD**: absolutely-positioned DOM over the canvas (`pointer-events: none`): big last-throw speed in mph/km/h, session best, ring score, connection status, measured round-trip latency.
 - **Pairing panel**: on load, `new Peer()` → QR of `phone/?peer=<id>` (via `qrcodejs`) plus the raw link for manual entry. Visible connecting/retry state with backoff — the free PeerJS cloud can take 1–20 s or need a retry. Reconnect handling on both ends.
@@ -103,7 +104,7 @@ Each milestone ends runnable and demoed with a short screen recording (headless 
 - **M1 — pairing**: PeerJS + QR + retry/backoff + ping latency in HUD; phone sends taps, desktop shows them. *Accept: phone tap visibly registers on desktop over the same Wi-Fi, latency shown.*
 - **M2 — sensor capture**: permission flow, wake lock, CSS armor, raw sensor debug view on the phone, unit-calibration check. *Accept: quaternion + accel values stream on-screen on iPhone and Android.*
 - **M3 — live hand**: pose streaming, desktop arm rig follows the phone in real time. *Accept: swinging the phone swings the in-game hand with no visible lag or axis flips.*
-- **M4 — the throw**: release state machine (built against recorded fixtures first), throw event, ballistic flight, target hit/miss. *Accept: a deliberate throw launches the ball; wrist flicks and repositioning do not.*
+- **M4 — the throw**: release state machine (built against recorded fixtures first), throw event with spin, flight with gravity + drag + Magnus, release haptic, target hit/miss. *Accept: a deliberate throw launches the ball and buzzes the phone; wrist flicks and repositioning do not.*
 - **M5 — training loop**: speed meter, scoring rings, auto ball feed, gain calibration so hard/clean throws read fast and lazy ones read slow. *Accept: three testers agree the meter ranks their throws correctly.*
 - **M6 — polish**: reconnects, wake-lock re-acquire, denied-permission UI, safety screen, TURN-path notice when relayed (latency warning), README.
 

@@ -67,13 +67,23 @@ CSS armor for violent swinging: `overscroll-behavior: none`, `touch-action: none
 
 ### 4.3 Fusion + throw pipeline (pure functions, unit-testable)
 
-1. **Orientation**: own complementary filter — integrate gyro into quaternion `q`, nudge pitch/roll toward the accelerometer's gravity direction with a small gain. **No compass ever** (iOS doesn't fuse it, it drifts near electronics). Yaw is gyro-only in an arbitrary "game frame". Whenever the phone sits still in the ready pose, the full grip-reference quaternion `q_ref` is re-captured — the player holds the phone however they prefer, and that captured pose is defined as "relaxed hand, facing the target". Gravity still pins up/down inside the filter; the grip mapping lives one layer up.
+1. **Orientation**: own complementary filter — integrate gyro into quaternion `q`, nudge pitch/roll toward the accelerometer's gravity direction with a small gain. **No compass ever** (iOS doesn't fuse it, it drifts near electronics). Yaw is gyro-only in an arbitrary "game frame", anchored by the calibration ritual (§4.4): calibration fixes the device→hand grip transform and the player's body axes once; the at-rest ZUPT then only re-anchors slow yaw drift against that frame, never the grip.
 2. **World-frame linear acceleration**: rotate device acceleration by `q`, subtract gravity.
 3. **Hand velocity**: leaky integrator (`λ ≈ 0.98`) over high-passed world acceleration, plus the low-noise tangential proxy `v_t = |ω| × L_arm`. Zero-velocity update: when accel and gyro magnitudes stay under rest thresholds for ~120 ms, force `v = 0` and re-zero yaw.
 4. **Hand pose for rendering**: forward kinematics off orientation only — fixed shoulder anchor, virtual forearm `L_arm ≈ 0.3 m`, and the arm rig driven by the grip-relative rotation `q · q_ref⁻¹` applied to the neutral ready-arm pose, so grip style never matters — only how the phone has rotated since the ready pose. Integrated position is at most a 10–20 % garnish on top; never the primary driver (double integration drifts meters within a second).
 5. **Release state machine**: `IDLE → SWINGING` when world linear accel exceeds ~15 m/s² for 2–3 consecutive samples. During `SWINGING`, record the running peak sample (quaternion, velocity, timestamp). `SWINGING → RELEASED` when speed drops 3–5 % below peak for 2 consecutive samples, swing lasted ≥ 80 ms, and peak exceeded a minimum-throw floor. **Compute the throw from the recorded peak sample**, not the detection sample (detection lags the true peak by 1–3 frames). This mirrors real biomechanics: pitchers release essentially at peak hand speed, and peak timing is consistent across skill levels — only magnitude differs, so thresholds are fixed and gain carries the skill signal.
 6. **Throw vector**: direction = normalized hand-velocity direction at peak (blend toward the device-pointing axis when confidence is low); speed = calibrated monotone mapping from clamped peak hand speed (~0.5–10 m/s measured) to game ball speed (~20–45 m/s), tuned by playtesting rather than lever-arm math. Spin = the gyro's angular velocity at the release sample, rotated to world frame, scaled by its own playtested gain (a phone wrist snap peaks well below real ball rpm, and consumer gyros clip near ±2000°/s — clipped reads count as max spin).
 7. **Release feedback**: the instant the state machine fires, the phone vibrates (`navigator.vibrate(40)`) — Android only; iOS Safari has no vibration API, so the phone page flashes there instead. Because release detection runs on the phone, the buzz is zero-latency.
+
+### 4.4 Calibration ritual (first run + on demand)
+
+A guided ~15-second flow on the phone, mirrored with visuals on the desktop screen, establishes the player's body frame relative to the sensors:
+
+1. **Ready pose** — "hold the ball in your comfortable grip, arm relaxed, face the screen; hold still." Captures the reference quaternion `q_ref`; gravity pins up/down, the snapshot pins the rest.
+2. **Aim** — "raise your arm and point straight at the target; hold." Whatever device axis now points forward becomes the hand-forward axis. This step is what makes any grip style genuinely work: the game learns which way *your* grip faces instead of assuming a canonical hold.
+3. **Practice swing** — "do one relaxed air swing — do not let go." The dominant rotation axis gives the swing plane and handedness (left/right, overhand/sidearm), and its peak speed seeds the per-player gain so that player's medium effort maps to a medium throw.
+
+Forward (from aim) crossed with up (from gravity) yields out; the three axes form the player's body frame. Calibration persists per device in `localStorage`; a recalibrate button reruns the ritual, and the between-throws ZUPT only corrects slow yaw drift — it never overwrites the calibrated grip transform.
 
 ## 5. Desktop page
 
@@ -103,7 +113,7 @@ Each milestone ends runnable and demoed with a short screen recording (headless 
 - **M0 — skeleton + deploy**: repo layout, import-map three.js "hello scene", Pages live. *Accept: both URLs load over HTTPS on desktop and phone.*
 - **M1 — pairing**: PeerJS + QR + retry/backoff + ping latency in HUD; phone sends taps, desktop shows them. *Accept: phone tap visibly registers on desktop over the same Wi-Fi, latency shown.*
 - **M2 — sensor capture**: permission flow, wake lock, CSS armor, raw sensor debug view on the phone, unit-calibration check. *Accept: quaternion + accel values stream on-screen on iPhone and Android.*
-- **M3 — live hand**: pose streaming, desktop arm rig follows the phone in real time. *Accept: swinging the phone swings the in-game hand with no visible lag or axis flips.*
+- **M3 — live hand**: calibration ritual (§4.4), pose streaming, desktop arm rig follows the phone in real time. *Accept: after calibrating with any grip, swinging the phone swings the in-game hand with no visible lag or axis flips.*
 - **M4 — the throw**: release state machine (built against recorded fixtures first), throw event with spin, flight with gravity + drag + Magnus, release haptic, target hit/miss. *Accept: a deliberate throw launches the ball and buzzes the phone; wrist flicks and repositioning do not.*
 - **M5 — training loop**: speed meter, scoring rings, auto ball feed, gain calibration so hard/clean throws read fast and lazy ones read slow. *Accept: three testers agree the meter ranks their throws correctly.*
 - **M6 — polish**: reconnects, wake-lock re-acquire, denied-permission UI, safety screen, TURN-path notice when relayed (latency warning), README.

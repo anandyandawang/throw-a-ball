@@ -5,6 +5,8 @@ import {
   helloVersionMatches,
   makeHello,
   makePing,
+  isPoseData,
+  syncReference,
 } from '../shared/protocol.js'
 import { signalingQueryEntries } from '../shared/peer-config.js'
 
@@ -62,6 +64,8 @@ export function createDesktopPairing({ peerOptions, callbacks }) {
   const onPeerId = listeners.onPeerId || noop
   const onLatency = listeners.onLatency || noop
   const onTap = listeners.onTap || noop
+  const onPoseData = listeners.onPoseData || noop
+  const onSync = listeners.onSync || noop
 
   const outstandingPings = new Map()
 
@@ -167,6 +171,10 @@ export function createDesktopPairing({ peerOptions, callbacks }) {
     if (source !== connection || stopped || versionMismatch) {
       return
     }
+    if (isPoseData(data)) {
+      onPoseData(data)
+      return
+    }
     const message = decodeControlMessage(data)
     if (message === null) {
       return
@@ -181,6 +189,13 @@ export function createDesktopPairing({ peerOptions, callbacks }) {
     }
     if (message.type === MessageType.TAP) {
       onTap(message)
+      return
+    }
+    if (message.type === MessageType.SYNC) {
+      const qRef = syncReference(message)
+      if (qRef !== null) {
+        onSync(qRef)
+      }
     }
   }
 

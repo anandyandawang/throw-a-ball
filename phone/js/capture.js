@@ -1,4 +1,5 @@
 import {
+  GyroUnit,
   applyMotionSample,
   applyOrientationSample,
   createPipeline,
@@ -7,9 +8,19 @@ import {
   pipelineSnapshot,
   recordTraceSample,
   resetTiming,
+  resolvedGyroUnit,
+  rotationRateToRadPerS,
   traceSampleCount as recordedSampleCount,
   traceToJson
 } from './sensor-pipeline.js';
+import {
+  captureSyncReference,
+  checkSyncHold,
+  createFusion,
+  fuseMotionSample,
+  resetFusionMotion,
+  setSyncReference
+} from './fusion.js';
 
 const PERMISSION_GRANTED = 'granted';
 const PERMISSION_UNAVAILABLE = 'unavailable';
@@ -23,6 +34,7 @@ const TRACE_MIME_TYPE = 'application/json';
 const TRACE_FILE_PREFIX = 'imu-trace-';
 const TRACE_FILE_SUFFIX = '.json';
 const BLOCKING_TOUCH_OPTIONS = Object.freeze({ passive: false });
+const SYNC_REFERENCE_STORAGE_KEY = 'throwaball.qref.v1';
 const GRANTED_ACTIVATION = Object.freeze({ granted: true, reason: PERMISSION_GRANTED });
 
 function errorMessage(error) {
@@ -152,10 +164,65 @@ function downloadJson(json, fileName) {
   URL.revokeObjectURL(url);
 }
 
+function localStorageOrNull() {
+  try {
+    return globalThis.localStorage || null;
+  } catch {
+    return null;
+  }
+}
+
+function readStoredSyncReference() {
+  const storage = localStorageOrNull();
+  if (storage === null) {
+    return null;
+  }
+  try {
+    const raw = storage.getItem(SYNC_REFERENCE_STORAGE_KEY);
+    return raw === null || raw === undefined ? null : JSON.parse(raw);
+  } catch {
+    return null;
+  }
+}
+
+function writeStoredSyncReference(qRef) {
+  const storage = localStorageOrNull();
+  if (storage === null) {
+    return;
+  }
+  try {
+    storage.setItem(
+      SYNC_REFERENCE_STORAGE_KEY,
+      JSON.stringify({ x: qRef.x, y: qRef.y, z: qRef.z, w: qRef.w, savedAtMs: Date.now() })
+    );
+  } catch {
+    return;
+  }
+}
+
+function gyroUnitForFusion(pipeline) {
+  const unit = resolvedGyroUnit(pipeline);
+  return unit === GyroUnit.UNKNOWN ? GyroUnit.DEG_PER_S : unit;
+}
+
+function rotationRateVectorToRadPerS(rotationRate, unit) {
+  if (rotationRate === null) {
+    return null;
+  }
+  return {
+    x: rotationRateToRadPerS(rotationRate.x, unit),
+    y: rotationRateToRadPerS(rotationRate.y, unit),
+    z: rotationRateToRadPerS(rotationRate.z, unit)
+  };
+}
+
 export function createSensorCapture(callbacks) {
   const handlers = callbacks || {};
   const pipeline = createPipeline();
+  const fusion = createFusion();
 
+  let latestAccelIncludingGravity = null;
+  let synced = setSyncReference(fusion, readStoredSyncReference()) !== null;
   let recorder = createTraceRecorder();
   let recording = false;
   let capturing = false;
@@ -277,9 +344,37 @@ export function createSensorCapture(callbacks) {
       acceleration: toVector(event.acceleration)
     };
     applyMotionSample(pipeline, sample);
+    latestAccelIncludingGravity = sample.accelerationIncludingGravity;
     if (recording) {
       recordTraceSample(recorder, sample, latestOrientationEuler);
     }
+    fuseLatestMotion(sample);
+  }
+
+  function emitFusedSample(fused, timestampMs) {
+    if (typeof handlers.onFusedSample !== 'function') {
+      return;
+    }
+    handlers.onFusedSample({
+      quaternion: fused.quaternion,
+      speed: fused.speed,
+      atRest: fused.atRest,
+      timestampMs
+    });
+  }
+
+  function fuseLatestMotion(sample) {
+    const unit = gyroUnitForFusion(pipeline);
+    const fused = fuseMotionSample(fusion, {
+      dtMs: pipeline.lastDtMs,
+      gyroRadPerS: rotationRateVectorToRadPerS(sample.rotationRate, unit),
+      accel: sample.acceleration,
+      accelIncludingGravity: sample.accelerationIncludingGravity
+    });
+    if (!fused.initialized) {
+      return;
+    }
+    emitFusedSample(fused, sample.timeStampMs);
   }
 
   function handleDeviceOrientation(event) {
@@ -310,6 +405,7 @@ export function createSensorCapture(callbacks) {
     }
     if (capturing) {
       resetTiming(pipeline);
+      resetFusionMotion(fusion);
     }
   }
 
@@ -376,6 +472,24 @@ export function createSensorCapture(callbacks) {
     return recordedSampleCount(recorder);
   }
 
+  function syncNow() {
+    const hold = checkSyncHold(latestAccelIncludingGravity);
+    if (!hold.ok) {
+      return hold;
+    }
+    const qRef = captureSyncReference(fusion);
+    if (qRef === null) {
+      return checkSyncHold(null);
+    }
+    writeStoredSyncReference(qRef);
+    synced = true;
+    return { ok: true, qRef };
+  }
+
+  function syncState() {
+    return { synced, qRef: fusion.qRef === null ? null : { ...fusion.qRef } };
+  }
+
   document.addEventListener('visibilitychange', handleVisibilityChange);
 
   return {
@@ -385,6 +499,8 @@ export function createSensorCapture(callbacks) {
     startTrace,
     stopTraceAndDownload,
     snapshot,
+    syncNow,
+    syncState,
     traceSampleCount,
     get traceActive() {
       return recording;

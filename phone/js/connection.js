@@ -5,8 +5,11 @@ import {
   helloVersionMatches,
   makeHello,
   makePong,
-  makeTap
+  makeTap,
+  makeSync
 } from '../../shared/protocol.js';
+
+const POSE_BUFFERED_AMOUNT_LIMIT_BYTES = 65536;
 
 const RETRY_DELAYS_MS = Object.freeze([1000, 2000, 4000, 8000, 15000]);
 
@@ -73,6 +76,7 @@ export function createPhoneConnection({ desktopPeerId, peerOptions, callbacks })
   let tapCount = 0;
   let deadEnded = false;
   let torndown = false;
+  let cachedQRef = null;
 
   function setState(nextState, detail) {
     state = nextState;
@@ -250,6 +254,9 @@ export function createPhoneConnection({ desktopPeerId, peerOptions, callbacks })
     }
     retryAttempt = 0;
     setState(PhoneState.CONNECTED, Detail.PAIRED);
+    if (cachedQRef !== null) {
+      send(makeSync(cachedQRef));
+    }
   }
 
   function handlePeerDisconnected() {
@@ -299,6 +306,25 @@ export function createPhoneConnection({ desktopPeerId, peerOptions, callbacks })
     }
   }
 
+  function sendPose(float32Array) {
+    if (state !== PhoneState.CONNECTED || connection === null || connection.open !== true) {
+      return;
+    }
+    const dataChannel = connection.dataChannel;
+    if (dataChannel && dataChannel.bufferedAmount > POSE_BUFFERED_AMOUNT_LIMIT_BYTES) {
+      return;
+    }
+    connection.send(float32Array);
+  }
+
+  function sendSync(qRef) {
+    cachedQRef = qRef;
+    if (state !== PhoneState.CONNECTED) {
+      return;
+    }
+    send(makeSync(qRef));
+  }
+
   function destroy() {
     torndown = true;
     clearRetry();
@@ -306,5 +332,5 @@ export function createPhoneConnection({ desktopPeerId, peerOptions, callbacks })
     dropPeer();
   }
 
-  return { start, sendTap, destroy };
+  return { start, sendTap, sendPose, sendSync, destroy };
 }

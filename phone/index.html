@@ -2,94 +2,203 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>throw a ball</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+  <title>throw a ball — phone</title>
   <style>
+    :root {
+      --bg: #0a0a0a;
+      --ink: #e0e0e0;
+      --muted: #8a8a8a;
+      --faint: #555;
+      --dot: #f5a623;
+      --dot-soft: rgba(245, 166, 35, 0.28);
+    }
+
     * {
       margin: 0;
       padding: 0;
       box-sizing: border-box;
     }
 
+    html, body {
+      height: 100%;
+    }
+
     body {
       font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
-      background: #0a0a0a;
-      color: #e0e0e0;
+      background: var(--bg);
+      background-image: radial-gradient(120% 60% at 50% 0%, #16181c 0%, #0a0a0a 62%);
+      color: var(--ink);
       display: flex;
       flex-direction: column;
-      justify-content: center;
       align-items: center;
+      justify-content: space-between;
+      gap: 20px;
       min-height: 100vh;
-      padding: 20px;
+      padding: calc(22px + env(safe-area-inset-top)) 20px calc(22px + env(safe-area-inset-bottom));
+      overscroll-behavior: none;
+      user-select: none;
+      -webkit-user-select: none;
+      -webkit-touch-callout: none;
     }
 
-    .container {
-      text-align: center;
+    .title {
+      font-size: 0.95rem;
+      font-weight: 600;
+      letter-spacing: 0.16em;
+      text-transform: uppercase;
+      color: var(--muted);
+    }
+
+    .status {
       display: flex;
       flex-direction: column;
-      gap: 16px;
+      align-items: center;
+      gap: 8px;
+      text-align: center;
+      min-height: 84px;
     }
 
-    h1 {
-      font-size: 2.5rem;
+    [data-status] {
+      font-size: 1.9rem;
       font-weight: 600;
-      letter-spacing: -0.02em;
-      margin-bottom: 8px;
+      letter-spacing: -0.01em;
+      line-height: 1.1;
+      color: var(--dot);
     }
 
-    .tagline {
-      font-size: 1rem;
-      color: #999;
-      margin-bottom: 32px;
+    [data-status]::before {
+      content: "";
+      display: inline-block;
+      width: 0.42em;
+      height: 0.42em;
+      margin-right: 0.4em;
+      vertical-align: 0.14em;
+      border-radius: 50%;
+      background: var(--dot);
+      box-shadow: 0 0 0 6px var(--dot-soft);
     }
 
-    button {
-      padding: 16px 48px;
-      font-size: 1.1rem;
-      font-weight: 500;
+    [data-status][data-state="waiting"] {
+      --dot: #f5a623;
+      --dot-soft: rgba(245, 166, 35, 0.24);
+    }
+
+    [data-status][data-state="connecting"] {
+      --dot: #4a9eff;
+      --dot-soft: rgba(74, 158, 255, 0.24);
+    }
+
+    [data-status][data-state="connected"] {
+      --dot: #35d07f;
+      --dot-soft: rgba(53, 208, 127, 0.24);
+    }
+
+    [data-status][data-state="retrying"] {
+      --dot: #ff5c5c;
+      --dot-soft: rgba(255, 92, 92, 0.24);
+    }
+
+    [data-status-detail] {
+      font-size: 0.95rem;
+      line-height: 1.45;
+      color: var(--muted);
+      max-width: 30ch;
+    }
+
+    .tap-block {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      gap: 22px;
+    }
+
+    #tap-zone {
+      width: min(72vw, 62vh);
+      max-width: 360px;
+      aspect-ratio: 1 / 1;
       border: none;
-      border-radius: 8px;
+      border-radius: 50%;
+      font-family: inherit;
+      font-size: 1.25rem;
+      font-weight: 600;
+      letter-spacing: 0.06em;
+      text-transform: uppercase;
+      color: #04120a;
+      background: radial-gradient(circle at 50% 34%, #6ff0ad 0%, #35d07f 52%, #1d9c5c 100%);
+      box-shadow:
+        0 0 0 2px rgba(53, 208, 127, 0.45),
+        0 0 46px rgba(53, 208, 127, 0.32),
+        inset 0 -10px 26px rgba(0, 0, 0, 0.25);
       cursor: pointer;
-      background: #333;
-      color: #999;
-      transition: all 0.2s ease;
-      min-width: 200px;
-      min-height: 56px;
+      touch-action: manipulation;
+      transition: transform 0.12s ease, box-shadow 0.18s ease, opacity 0.18s ease;
     }
 
-    button:disabled {
-      opacity: 0.5;
+    #tap-zone:disabled {
+      color: #6a6a6a;
+      background: radial-gradient(circle at 50% 34%, #262a2e 0%, #1a1c1f 60%, #141517 100%);
+      box-shadow:
+        0 0 0 2px rgba(255, 255, 255, 0.05),
+        inset 0 -10px 26px rgba(0, 0, 0, 0.35);
       cursor: not-allowed;
     }
 
-    .button-caption {
-      font-size: 0.85rem;
-      color: #666;
-      margin-top: 8px;
-      line-height: 1.4;
+    #tap-zone.pressed {
+      transform: scale(0.93);
+      box-shadow:
+        0 0 0 10px rgba(53, 208, 127, 0.35),
+        0 0 70px rgba(53, 208, 127, 0.65),
+        inset 0 -6px 18px rgba(0, 0, 0, 0.2);
+    }
+
+    .counter {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      gap: 2px;
+    }
+
+    [data-phone-taps] {
+      font-size: 2.4rem;
+      font-weight: 600;
+      font-variant-numeric: tabular-nums;
+      line-height: 1;
+    }
+
+    .counter-label {
+      font-size: 0.72rem;
+      letter-spacing: 0.18em;
+      text-transform: uppercase;
+      color: var(--faint);
     }
 
     .footer {
-      position: fixed;
-      bottom: 16px;
-      right: 16px;
-      font-size: 0.75rem;
-      color: #555;
+      font-size: 0.7rem;
+      letter-spacing: 0.1em;
+      color: var(--faint);
     }
   </style>
 </head>
 <body>
-  <div class="container">
-    <h1>throw a ball</h1>
-    <p class="tagline">phone-as-the-ball pitching trainer</p>
-    <div>
-      <button disabled>Start</button>
-      <div class="button-caption">pairing arrives in a later milestone</div>
+  <div class="title">throw a ball</div>
+
+  <div class="status">
+    <div data-status data-state="waiting">waiting</div>
+    <div data-status-detail>starting up...</div>
+  </div>
+
+  <div class="tap-block">
+    <button id="tap-zone" type="button" disabled>tap</button>
+    <div class="counter">
+      <div data-phone-taps>0</div>
+      <div class="counter-label">taps sent</div>
     </div>
   </div>
 
   <div class="footer" id="footer"></div>
 
+  <script src="https://cdn.jsdelivr.net/npm/peerjs@1.5.5/dist/peerjs.min.js"></script>
   <script type="module" src="./js/main.js"></script>
 </body>
 </html>

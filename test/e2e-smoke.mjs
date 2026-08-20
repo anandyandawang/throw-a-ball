@@ -10,11 +10,13 @@ import { fileURLToPath } from 'node:url'
 const HERE = path.dirname(fileURLToPath(import.meta.url))
 const REPO_ROOT = path.dirname(HERE)
 const OUT_DIR = path.join(HERE, 'out')
-const THREE_VERSION = '0.185.1'
-const THREE_CACHE_DIR = path.join(HERE, '.cache', 'three', THREE_VERSION)
-const THREE_PACKAGE_REL = 'package'
-const THREE_MODULE_REL = path.join(THREE_PACKAGE_REL, 'build', 'three.module.js')
-const THREE_CDN_PREFIX = `https://cdn.jsdelivr.net/npm/three@${THREE_VERSION}/`
+const CACHE_ROOT = path.join(HERE, '.cache')
+const PACKAGE_REL = 'package'
+const CDN_PACKAGES = [
+  { name: 'three', version: '0.185.1', entryRel: path.join('build', 'three.module.js') },
+  { name: 'peerjs', version: '1.5.5', entryRel: path.join('dist', 'peerjs.min.js') },
+  { name: 'qrcodejs', version: '1.0.0', entryRel: 'qrcode.min.js' },
+]
 const VIEWPORT = { width: 1280, height: 720 }
 const OVERALL_TIMEOUT_MS = 90000
 const SETTLE_MS = 500
@@ -49,30 +51,43 @@ function resolvePlaywright() {
   }
 }
 
-async function ensureThreeCache() {
-  const packageDir = path.join(THREE_CACHE_DIR, THREE_PACKAGE_REL)
-  const modulePath = path.join(THREE_CACHE_DIR, THREE_MODULE_REL)
-  if (fs.existsSync(modulePath)) {
+async function ensurePackageCache({ name, version, entryRel }) {
+  const cacheDir = path.join(CACHE_ROOT, name, version)
+  const packageDir = path.join(cacheDir, PACKAGE_REL)
+  const entryPath = path.join(packageDir, entryRel)
+  if (fs.existsSync(entryPath)) {
     return packageDir
   }
-  fs.mkdirSync(THREE_CACHE_DIR, { recursive: true })
-  const tarballUrl = `https://registry.npmjs.org/three/-/three-${THREE_VERSION}.tgz`
+  fs.mkdirSync(cacheDir, { recursive: true })
+  const tarballUrl = `https://registry.npmjs.org/${name}/-/${name}-${version}.tgz`
   const response = await fetch(tarballUrl)
   if (!response.ok) {
     throw new Error(`fetch ${tarballUrl} failed: ${response.status} ${response.statusText}`)
   }
   const buffer = Buffer.from(await response.arrayBuffer())
-  const tarballPath = path.join(os.tmpdir(), `three-${THREE_VERSION}-${process.pid}.tgz`)
+  const tarballPath = path.join(os.tmpdir(), `${name}-${version}-${process.pid}.tgz`)
   fs.writeFileSync(tarballPath, buffer)
   try {
-    execFileSync('tar', ['-xzf', tarballPath, '-C', THREE_CACHE_DIR])
+    execFileSync('tar', ['-xzf', tarballPath, '-C', cacheDir])
   } finally {
     fs.rmSync(tarballPath, { force: true })
   }
-  if (!fs.existsSync(modulePath)) {
-    throw new Error(`expected ${modulePath} after extracting ${tarballUrl}`)
+  if (!fs.existsSync(entryPath)) {
+    throw new Error(`expected ${entryPath} after extracting ${tarballUrl}`)
   }
   return packageDir
+}
+
+async function ensureCdnCaches() {
+  const caches = []
+  for (const pkg of CDN_PACKAGES) {
+    const packageDir = await ensurePackageCache(pkg)
+    caches.push({
+      prefix: `https://cdn.jsdelivr.net/npm/${pkg.name}@${pkg.version}/`,
+      packageDir,
+    })
+  }
+  return caches
 }
 
 function isPathInside(candidate, root) {
@@ -133,13 +148,14 @@ async function launchBrowser(chromium) {
   }
 }
 
-async function installExternalRouting(context, threePackageDir, ownAbortedUrls) {
+async function installExternalRouting(context, cdnCaches, ownAbortedUrls) {
   await context.route('**/*', async (route) => {
     const url = route.request().url()
-    if (url.startsWith(THREE_CDN_PREFIX)) {
-      const relPath = url.slice(THREE_CDN_PREFIX.length).split('?')[0]
-      const filePath = path.join(threePackageDir, relPath)
-      if (isPathInside(filePath, threePackageDir) && fs.existsSync(filePath)) {
+    const cache = cdnCaches.find((entry) => url.startsWith(entry.prefix))
+    if (cache) {
+      const relPath = url.slice(cache.prefix.length).split('?')[0]
+      const filePath = path.join(cache.packageDir, relPath)
+      if (isPathInside(filePath, cache.packageDir) && fs.existsSync(filePath)) {
         await route.fulfill({
           contentType: contentTypeFor(filePath),
           body: fs.readFileSync(filePath),
@@ -164,9 +180,13 @@ function attachDiagnostics(page, ownAbortedUrls) {
   const pageErrors = []
   const requestFailures = []
   page.on('console', (msg) => {
-    if (msg.type() === 'error') {
-      consoleErrors.push(msg.text())
+    if (msg.type() !== 'error') {
+      return
     }
+    if (ownAbortedUrls.has(msg.location().url)) {
+      return
+    }
+    consoleErrors.push(msg.text())
   })
   page.on('pageerror', (err) => {
     pageErrors.push(err && err.message ? err.message : String(err))
@@ -201,12 +221,12 @@ async function checkDesktopExtras(page) {
   return notes
 }
 
-async function checkPage(browser, { name, url, screenshotPath, isDesktop, threePackageDir }) {
+async function checkPage(browser, { name, url, screenshotPath, isDesktop, cdnCaches }) {
   const ownAbortedUrls = new Set()
   const context = await browser.newContext({ viewport: VIEWPORT })
   const page = await context.newPage()
   const diagnostics = attachDiagnostics(page, ownAbortedUrls)
-  await installExternalRouting(context, threePackageDir, ownAbortedUrls)
+  await installExternalRouting(context, cdnCaches, ownAbortedUrls)
 
   const extraNotes = []
   try {
@@ -253,7 +273,7 @@ function resultHasFailure(result) {
 async function runSmoke() {
   fs.mkdirSync(OUT_DIR, { recursive: true })
   const { chromium } = resolvePlaywright()
-  const threePackageDir = await ensureThreeCache()
+  const cdnCaches = await ensureCdnCaches()
   const server = await startServer(REPO_ROOT)
   const port = server.address().port
   const baseUrl = `http://127.0.0.1:${port}`
@@ -266,14 +286,14 @@ async function runSmoke() {
         url: `${baseUrl}/`,
         screenshotPath: path.join(OUT_DIR, 'desktop.png'),
         isDesktop: true,
-        threePackageDir,
+        cdnCaches,
       },
       {
         name: 'phone',
         url: `${baseUrl}/phone/`,
         screenshotPath: path.join(OUT_DIR, 'phone.png'),
         isDesktop: false,
-        threePackageDir,
+        cdnCaches,
       },
     ]
     const results = []

@@ -1,7 +1,22 @@
-<title>throw a ball</title>
+<!DOCTYPE html>
+<html lang="en">
+<head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>throw a ball</title>
 <style>
+  :root {
+    --hud-surface: rgba(9, 14, 22, 0.74);
+    --hud-border: rgba(255, 255, 255, 0.14);
+    --hud-shadow: 0 12px 34px rgba(0, 0, 0, 0.42);
+    --hud-text: #eef3f8;
+    --hud-muted: #9fb0c2;
+    --state-waiting: #f5b544;
+    --state-connecting: #4d9bff;
+    --state-connected: #4ade80;
+    --state-retrying: #ff5f56;
+  }
+
   html, body {
     margin: 0;
     padding: 0;
@@ -9,13 +24,274 @@
     height: 100%;
     background: #87ceeb;
   }
+
   canvas {
     display: block;
     width: 100vw;
     height: 100vh;
+    position: fixed;
+    inset: 0;
+    z-index: 0;
+  }
+
+  #hud {
+    position: fixed;
+    inset: 0;
+    z-index: 10;
+    pointer-events: none;
+    color: var(--hud-text);
+    font-family: ui-sans-serif, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+  }
+
+  .hud-panel {
+    position: absolute;
+    background: var(--hud-surface);
+    border: 1px solid var(--hud-border);
+    border-radius: 16px;
+    box-shadow: var(--hud-shadow);
+    backdrop-filter: blur(10px);
+    -webkit-backdrop-filter: blur(10px);
+  }
+
+  .hud-status {
+    top: 22px;
+    left: 22px;
+    max-width: 40vw;
+    padding: 16px 24px 18px;
+    display: flex;
+    flex-direction: column;
+    gap: 7px;
+  }
+
+  .hud-status-word {
+    display: flex;
+    align-items: center;
+    gap: 13px;
+    font-size: 1.75rem;
+    font-weight: 650;
+    line-height: 1;
+  }
+
+  .hud-status-word::before {
+    content: '';
+    flex: none;
+    width: 15px;
+    height: 15px;
+    border-radius: 50%;
+    background: var(--state-waiting);
+    box-shadow: 0 0 15px var(--state-waiting);
+  }
+
+  [data-status][data-state="connecting"]::before {
+    background: var(--state-connecting);
+    box-shadow: 0 0 15px var(--state-connecting);
+  }
+
+  [data-status][data-state="connected"]::before {
+    background: var(--state-connected);
+    box-shadow: 0 0 18px var(--state-connected);
+  }
+
+  [data-status][data-state="retrying"]::before {
+    background: var(--state-retrying);
+    box-shadow: 0 0 18px var(--state-retrying);
+  }
+
+  [data-status][data-state="waiting"]::before,
+  [data-status][data-state="connecting"]::before,
+  [data-status][data-state="retrying"]::before {
+    animation: status-pulse 1.7s ease-in-out infinite;
+  }
+
+  @keyframes status-pulse {
+    0%, 100% { opacity: 1; }
+    50% { opacity: 0.3; }
+  }
+
+  .hud-status-detail {
+    font-size: 0.95rem;
+    line-height: 1.35;
+    color: var(--hud-muted);
+  }
+
+  .hud-stats {
+    top: 22px;
+    right: 22px;
+    padding: 14px 24px 16px;
+    display: flex;
+    align-items: flex-end;
+    gap: 32px;
+  }
+
+  .hud-stat {
+    display: flex;
+    flex-direction: column;
+    align-items: flex-end;
+    gap: 4px;
+  }
+
+  .hud-stat-label {
+    font-size: 0.7rem;
+    letter-spacing: 0.18em;
+    text-transform: uppercase;
+    color: var(--hud-muted);
+  }
+
+  .hud-stat-value {
+    font-size: 2.5rem;
+    font-weight: 700;
+    line-height: 1;
+    font-variant-numeric: tabular-nums;
+  }
+
+  #pairing {
+    position: absolute;
+    left: 22px;
+    bottom: 22px;
+    width: 306px;
+    padding: 20px;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 13px;
+    pointer-events: auto;
+    background: var(--hud-surface);
+    border: 1px solid var(--hud-border);
+    border-radius: 18px;
+    box-shadow: var(--hud-shadow);
+    backdrop-filter: blur(10px);
+    -webkit-backdrop-filter: blur(10px);
+  }
+
+  #pairing.hidden {
+    display: none;
+  }
+
+  .pairing-title {
+    font-size: 0.72rem;
+    letter-spacing: 0.2em;
+    text-transform: uppercase;
+    color: var(--hud-muted);
+  }
+
+  #qr {
+    width: 220px;
+    height: 220px;
+    border-radius: 12px;
+    background: #ffffff;
+    overflow: hidden;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+  }
+
+  #qr:empty {
+    background: rgba(255, 255, 255, 0.07);
+    border: 1px dashed var(--hud-border);
+  }
+
+  #qr img,
+  #qr canvas {
+    display: block;
+  }
+
+  .pairing-link {
+    width: 100%;
+    font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+    font-size: 0.78rem;
+    line-height: 1.45;
+    text-align: center;
+    color: #cfe3ff;
+    word-break: break-all;
+    user-select: all;
+    -webkit-user-select: all;
+  }
+
+  .pairing-hint {
+    font-size: 0.75rem;
+    line-height: 1.4;
+    text-align: center;
+    color: var(--hud-muted);
+  }
+
+  #tap-flash {
+    position: fixed;
+    inset: 0;
+    z-index: 30;
+    pointer-events: none;
+  }
+
+  #tap-flash::before,
+  #tap-flash::after {
+    content: '';
+    position: absolute;
+    opacity: 0;
+  }
+
+  #tap-flash::before {
+    inset: 0;
+    background: radial-gradient(circle at center, rgba(74, 222, 128, 0) 48%, rgba(74, 222, 128, 0.62) 100%);
+  }
+
+  #tap-flash::after {
+    left: 50%;
+    top: 50%;
+    width: 24vmin;
+    height: 24vmin;
+    margin: -12vmin 0 0 -12vmin;
+    border-radius: 50%;
+    border: 1.3vmin solid rgba(214, 255, 232, 0.95);
+    box-shadow: 0 0 7vmin rgba(74, 222, 128, 0.85), inset 0 0 5vmin rgba(74, 222, 128, 0.75);
+  }
+
+  #tap-flash.active::before {
+    animation: tap-edge-glow 400ms ease-out;
+  }
+
+  #tap-flash.active::after {
+    animation: tap-ring 400ms ease-out;
+  }
+
+  @keyframes tap-edge-glow {
+    from { opacity: 1; }
+    to { opacity: 0; }
+  }
+
+  @keyframes tap-ring {
+    from { opacity: 1; transform: scale(0.3); }
+    to { opacity: 0; transform: scale(3.4); }
   }
 </style>
 <script type="importmap">
   {"imports":{"three":"https://cdn.jsdelivr.net/npm/three@0.185.1/build/three.module.js"}}
 </script>
+<script src="https://cdn.jsdelivr.net/npm/peerjs@1.5.5/dist/peerjs.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/qrcodejs@1.0.0/qrcode.min.js"></script>
 <script type="module" src="./js/main.js"></script>
+</head>
+<body>
+  <div id="hud">
+    <div class="hud-panel hud-status">
+      <span class="hud-status-word" data-status data-state="waiting">waiting</span>
+      <span class="hud-status-detail" data-status-detail>starting up</span>
+    </div>
+    <div class="hud-panel hud-stats">
+      <div class="hud-stat">
+        <span class="hud-stat-label">latency</span>
+        <span class="hud-stat-value" data-latency>— ms</span>
+      </div>
+      <div class="hud-stat">
+        <span class="hud-stat-label">taps</span>
+        <span class="hud-stat-value" data-taps>0</span>
+      </div>
+    </div>
+    <div id="pairing">
+      <div class="pairing-title">pair your phone</div>
+      <div id="qr"></div>
+      <div class="pairing-link" data-link></div>
+      <div class="pairing-hint">scan the code, or open this link in your phone browser</div>
+    </div>
+  </div>
+  <div id="tap-flash"></div>
+</body>
+</html>

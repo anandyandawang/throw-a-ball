@@ -1,0 +1,6 @@
+test/.cache/
+test/out/
+node_modules/
+*.webm
+*.mp4
+.DS_Store

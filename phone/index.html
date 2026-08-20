@@ -12,6 +12,9 @@
       --faint: #555;
       --dot: #f5a623;
       --dot-soft: rgba(245, 166, 35, 0.28);
+      --danger: #ff5c5c;
+      --panel: rgba(255, 255, 255, 0.04);
+      --panel-edge: rgba(255, 255, 255, 0.09);
     }
 
     * {
@@ -40,6 +43,10 @@
       user-select: none;
       -webkit-user-select: none;
       -webkit-touch-callout: none;
+    }
+
+    body.capture-active {
+      touch-action: none;
     }
 
     .title {
@@ -104,6 +111,19 @@
       line-height: 1.45;
       color: var(--muted);
       max-width: 30ch;
+    }
+
+    .screen {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      gap: 22px;
+      width: 100%;
+      max-width: 420px;
+    }
+
+    .screen[hidden] {
+      display: none;
     }
 
     .tap-block {
@@ -173,6 +193,151 @@
       color: var(--faint);
     }
 
+    .action {
+      font-family: inherit;
+      font-size: 0.95rem;
+      font-weight: 600;
+      letter-spacing: 0.12em;
+      text-transform: uppercase;
+      color: var(--ink);
+      background: var(--panel);
+      border: 1px solid var(--panel-edge);
+      border-radius: 14px;
+      padding: 15px 26px;
+      min-width: 220px;
+      cursor: pointer;
+      touch-action: manipulation;
+      transition: background 0.16s ease, border-color 0.16s ease, transform 0.1s ease;
+    }
+
+    .action:active {
+      transform: scale(0.97);
+    }
+
+    .action.primary {
+      color: #04120a;
+      background: linear-gradient(180deg, #6ff0ad 0%, #35d07f 100%);
+      border-color: transparent;
+    }
+
+    .action.warn {
+      color: #1a0505;
+      background: linear-gradient(180deg, #ff9c6b 0%, #ff5c5c 100%);
+      border-color: transparent;
+    }
+
+    .panel {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      gap: 14px;
+      width: 100%;
+      padding: 20px;
+      text-align: center;
+      background: var(--panel);
+      border: 1px solid var(--panel-edge);
+      border-radius: 18px;
+    }
+
+    .panel-heading {
+      font-size: 1.35rem;
+      font-weight: 700;
+      letter-spacing: 0.02em;
+    }
+
+    .panel-note {
+      font-size: 0.9rem;
+      line-height: 1.5;
+      color: var(--muted);
+      max-width: 34ch;
+    }
+
+    .warning-mark {
+      font-size: 2.4rem;
+      line-height: 1;
+    }
+
+    .warning-heading {
+      font-size: 1.5rem;
+      font-weight: 700;
+      line-height: 1.25;
+      color: var(--danger);
+      max-width: 18ch;
+    }
+
+    .warning-shout {
+      font-size: 1.05rem;
+      font-weight: 700;
+      letter-spacing: 0.14em;
+      text-transform: uppercase;
+      color: var(--ink);
+    }
+
+    [data-denied-reason] {
+      font-size: 0.95rem;
+      font-weight: 600;
+      color: var(--danger);
+      overflow-wrap: anywhere;
+    }
+
+    .steps {
+      list-style: decimal;
+      text-align: left;
+      font-size: 0.88rem;
+      line-height: 1.55;
+      color: var(--muted);
+      padding-left: 22px;
+      align-self: stretch;
+    }
+
+    .readout {
+      display: grid;
+      grid-template-columns: minmax(0, auto) minmax(0, 1fr);
+      gap: 8px 12px;
+      align-items: baseline;
+      width: 100%;
+      padding: 16px 14px;
+      background: var(--panel);
+      border: 1px solid var(--panel-edge);
+      border-radius: 18px;
+    }
+
+    .readout-label {
+      font-size: 0.6rem;
+      letter-spacing: 0.1em;
+      text-transform: uppercase;
+      color: var(--faint);
+    }
+
+    .readout-value {
+      font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+      font-size: 0.74rem;
+      font-variant-numeric: tabular-nums;
+      white-space: pre;
+      overflow-x: auto;
+      color: var(--ink);
+    }
+
+    .capture-controls {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      gap: 12px;
+      width: 100%;
+    }
+
+    .trace-line {
+      font-size: 0.72rem;
+      letter-spacing: 0.16em;
+      text-transform: uppercase;
+      color: var(--faint);
+    }
+
+    [data-trace-count] {
+      font-variant-numeric: tabular-nums;
+      color: var(--ink);
+    }
+
     .footer {
       font-size: 0.7rem;
       letter-spacing: 0.1em;
@@ -188,13 +353,71 @@
     <div data-status-detail>starting up...</div>
   </div>
 
-  <div class="tap-block">
-    <button id="tap-zone" type="button" disabled>tap</button>
-    <div class="counter">
-      <div data-phone-taps>0</div>
-      <div class="counter-label">taps sent</div>
+  <section class="screen" id="screen-home">
+    <div class="tap-block">
+      <button id="tap-zone" type="button" disabled>tap</button>
+      <div class="counter">
+        <div data-phone-taps>0</div>
+        <div class="counter-label">taps sent</div>
+      </div>
     </div>
-  </div>
+    <button class="action" id="start-sensors" type="button">start sensors</button>
+  </section>
+
+  <section class="screen" id="screen-denied" hidden>
+    <div class="panel">
+      <div class="panel-heading">sensors blocked</div>
+      <div data-denied-reason>permission denied</div>
+      <div class="panel-note">iOS never asks a second time. Clear this site's stored permission, then start again.</div>
+      <ol class="steps">
+        <li>open Settings</li>
+        <li>go to Safari</li>
+        <li>tap Advanced</li>
+        <li>tap Website Data</li>
+        <li>delete this site's entry</li>
+        <li>reload this page</li>
+        <li>tap start sensors again</li>
+      </ol>
+    </div>
+    <button class="action" id="retry-permissions" type="button">try again</button>
+  </section>
+
+  <section class="screen" id="screen-safety" hidden>
+    <div class="panel">
+      <div class="warning-mark">⚠</div>
+      <div class="warning-heading">strap or grip the phone</div>
+      <div class="warning-shout">never let go</div>
+      <div class="panel-note">Use a wrist strap or a phone tether before you swing. A throwing motion with a loose grip sends the phone across the room.</div>
+    </div>
+    <button class="action primary" id="begin-capture" type="button">i am holding on</button>
+  </section>
+
+  <section class="screen" id="screen-capture" hidden>
+    <div class="readout">
+      <div class="readout-label">quat</div>
+      <div class="readout-value" data-quat>—</div>
+      <div class="readout-label">gyro</div>
+      <div class="readout-value" data-gyro>—</div>
+      <div class="readout-label">accel</div>
+      <div class="readout-value" data-accel>—</div>
+      <div class="readout-label">accel+g</div>
+      <div class="readout-value" data-accel-g>—</div>
+      <div class="readout-label">rate</div>
+      <div class="readout-value" data-rate>—</div>
+      <div class="readout-label">orient rate</div>
+      <div class="readout-value" data-orientation-rate>—</div>
+      <div class="readout-label">dt</div>
+      <div class="readout-value" data-dt>—</div>
+      <div class="readout-label">unit</div>
+      <div class="readout-value" data-gyro-unit>—</div>
+    </div>
+    <div class="panel-note" data-capture-note hidden></div>
+    <div class="capture-controls">
+      <button class="action primary" id="record-trace" type="button">record trace</button>
+      <div class="trace-line">samples <span data-trace-count>0</span></div>
+      <button class="action warn" id="exit-capture" type="button">exit capture</button>
+    </div>
+  </section>
 
   <div class="footer" id="footer"></div>
 

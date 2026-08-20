@@ -1,4 +1,4 @@
-import { PROTOCOL_VERSION } from '../../shared/protocol.js';
+import { PROTOCOL_VERSION, encodePose } from '../../shared/protocol.js';
 import { peerOptionsFromSearch } from '../../shared/peer-config.js';
 import { createPhoneConnection } from './connection.js';
 import { createSensorCapture } from './capture.js';
@@ -40,10 +40,12 @@ renderTapCount(0);
 
 const desktopPeerId = new URLSearchParams(location.search).get('peer');
 
+let connection = null;
+
 if (desktopPeerId === null) {
   renderState('waiting', NO_PEER_PARAM_DETAIL);
 } else {
-  const connection = createPhoneConnection({
+  connection = createPhoneConnection({
     desktopPeerId,
     peerOptions: peerOptionsFromSearch(location.search),
     callbacks: { onStateChange: renderState, onTapSent: renderTapCount }
@@ -77,6 +79,16 @@ const ZERO_COUNT = '0';
 const EMPTY_TEXT = '';
 const NO_SENSOR_DATA_NOTE = 'no sensor data — this browser may be blocking motion sensors';
 const NO_SENSOR_DATA_GRACE_MS = 2000;
+const SYNC_NOTE_UNSYNCED = 'not synced yet — hold the phone upside-down at your side and sync';
+const SYNC_NOTE_SYNCED = 'synced — arm reference stored';
+const SYNC_NOTE_RESTORED = 'synced — using the stored arm reference';
+const SyncNoteState = Object.freeze({
+  UNSYNCED: 'unsynced',
+  SYNCED: 'synced',
+  REJECTED: 'rejected'
+});
+const HAND_SPEED_DIGITS = 2;
+const HAND_SPEED_WIDTH = 6;
 
 const screenElements = Object.freeze({
   [Screen.HOME]: document.getElementById('screen-home'),
@@ -93,6 +105,9 @@ const recordTraceButton = document.getElementById('record-trace');
 const deniedReasonElement = document.querySelector('[data-denied-reason]');
 const traceCountElement = document.querySelector('[data-trace-count]');
 const captureNoteElement = document.querySelector('[data-capture-note]');
+const syncButton = document.getElementById('sync-hold');
+const syncNoteElement = document.querySelector('[data-sync-note]');
+const handSpeedElement = document.querySelector('[data-hand-speed]');
 
 const readoutElements = Object.freeze({
   quaternion: document.querySelector('[data-quat]'),
@@ -207,7 +222,68 @@ function renderReadout(snapshot) {
   }
 }
 
-const capture = createSensorCapture({ onReadout: renderReadout });
+let poseSeq = 0;
+let synced = false;
+
+function renderHandSpeed(speed) {
+  handSpeedElement.textContent = formatNumber(speed, HAND_SPEED_DIGITS, HAND_SPEED_WIDTH);
+}
+
+function renderSyncNote(text, state) {
+  syncNoteElement.textContent = text;
+  syncNoteElement.dataset.syncState = state;
+}
+
+function streamPose(fused) {
+  renderHandSpeed(fused.speed);
+  if (connection === null || fused.quaternion === null) {
+    return;
+  }
+  poseSeq += 1;
+  connection.sendPose(
+    encodePose({
+      quaternion: fused.quaternion,
+      speed: fused.speed,
+      seq: poseSeq,
+      timestampMs: fused.timestampMs
+    })
+  );
+}
+
+const capture = createSensorCapture({ onReadout: renderReadout, onFusedSample: streamPose });
+
+function publishSyncReference(qRef) {
+  if (connection === null || qRef === null) {
+    return;
+  }
+  connection.sendSync(qRef);
+}
+
+function runSync() {
+  const result = capture.syncNow();
+  if (!result.ok) {
+    renderSyncNote(result.reason, SyncNoteState.REJECTED);
+    return;
+  }
+  synced = true;
+  renderSyncNote(SYNC_NOTE_SYNCED, SyncNoteState.SYNCED);
+  publishSyncReference(result.qRef);
+}
+
+function adoptStoredSyncReference() {
+  const stored = capture.syncState();
+  if (!stored.synced) {
+    renderSyncNote(SYNC_NOTE_UNSYNCED, SyncNoteState.UNSYNCED);
+    return;
+  }
+  synced = true;
+  renderSyncNote(SYNC_NOTE_RESTORED, SyncNoteState.SYNCED);
+  publishSyncReference(stored.qRef);
+}
+
+syncButton.addEventListener('click', runSync);
+renderHandSpeed(null);
+adoptStoredSyncReference();
 
 function applyActivation(activation) {
   if (activation.granted) {
@@ -273,6 +349,12 @@ window.__phoneSensors = {
   },
   traceSampleCount() {
     return capture.traceSampleCount();
+  },
+  get synced() {
+    return synced;
+  },
+  get poseSeq() {
+    return poseSeq;
   }
 };
 

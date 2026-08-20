@@ -4,8 +4,15 @@ const SKY_COLOR = 0x87ceeb
 const GROUND_COLOR = 0x6b8f4e
 const TARGET_CENTER = new THREE.Vector3(0, 1.2, -18.44)
 const CAMERA_POSITION = new THREE.Vector3(0, 1.7, 0)
-const BALL_POSITION = new THREE.Vector3(0.26, 1.4, -0.62)
 const BALL_RADIUS = 0.037
+
+const SHOULDER_POSITION = new THREE.Vector3(0.34, 1.5, -0.95)
+const ARM_LENGTH = 0.3
+const FOREARM_TOP_RADIUS = 0.036
+const FOREARM_TIP_RADIUS = 0.028
+const HAND_RADIUS = 0.045
+const BALL_HOLD_OFFSET = new THREE.Vector3(0, -0.34, 0)
+const SKIN_COLOR = 0xd8a07a
 
 const RING_COLORS = [0xffffff, 0x1a1a1a, 0x2f6fd6, 0xd6291a, 0xf4c430]
 const RING_COUNT = RING_COLORS.length
@@ -106,9 +113,53 @@ function buildBall() {
     roughness: 0.5,
     metalness: 0.05,
   })
-  const ball = new THREE.Mesh(geometry, material)
-  ball.position.copy(BALL_POSITION)
-  return ball
+  return new THREE.Mesh(geometry, material)
+}
+
+function buildArmRig(ball) {
+  const group = new THREE.Group()
+  group.position.copy(SHOULDER_POSITION)
+
+  const skin = new THREE.MeshStandardMaterial({
+    color: SKIN_COLOR,
+    roughness: 0.72,
+    metalness: 0,
+  })
+
+  const forearmGeometry = new THREE.CylinderGeometry(
+    FOREARM_TOP_RADIUS,
+    FOREARM_TIP_RADIUS,
+    ARM_LENGTH,
+    16
+  )
+  const forearm = new THREE.Mesh(forearmGeometry, skin)
+  forearm.position.set(0, -ARM_LENGTH / 2, 0)
+  group.add(forearm)
+
+  const hand = new THREE.Mesh(new THREE.SphereGeometry(HAND_RADIUS, 20, 14), skin)
+  hand.position.set(0, -ARM_LENGTH, 0)
+  group.add(hand)
+
+  ball.position.copy(BALL_HOLD_OFFSET)
+  group.add(ball)
+
+  return group
+}
+
+function createArmRig(ball) {
+  const group = buildArmRig(ball)
+
+  function setRotation(q) {
+    if (q === null || typeof q !== 'object') {
+      return
+    }
+    if (!Number.isFinite(q.x) || !Number.isFinite(q.y) || !Number.isFinite(q.z) || !Number.isFinite(q.w)) {
+      return
+    }
+    group.quaternion.set(q.x, q.y, q.z, q.w)
+  }
+
+  return { group, setRotation }
 }
 
 export function buildScene() {
@@ -128,10 +179,11 @@ export function buildScene() {
   scene.add(targetBoard)
 
   const ball = buildBall()
-  scene.add(ball)
+  const armRig = createArmRig(ball)
+  scene.add(armRig.group)
 
   const camera = buildCamera()
   const renderer = buildRenderer()
 
-  return { scene, camera, renderer, ball }
+  return { scene, camera, renderer, ball, armRig }
 }

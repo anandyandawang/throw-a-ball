@@ -4,6 +4,7 @@ import {
   PROTOCOL_VERSION,
   MessageType,
   POSE_FLOATS,
+  POSE_BYTES,
   PoseIndex,
   encodeControlMessage,
   decodeControlMessage,
@@ -11,7 +12,12 @@ import {
   helloVersionMatches,
   makePing,
   makePong,
-  makeTap
+  makeTap,
+  encodePose,
+  decodePose,
+  isPoseData,
+  makeSync,
+  syncReference
 } from '../shared/protocol.js';
 import {
   SIGNALING_PARAM_KEYS,
@@ -28,7 +34,7 @@ test('PROTOCOL_VERSION is a positive integer', () => {
 test('MessageType is frozen with expected keys and values', () => {
   assert.ok(Object.isFrozen(MessageType));
 
-  const expectedKeys = ['HELLO', 'PING', 'PONG', 'TAP', 'RESET', 'THROW'];
+  const expectedKeys = ['HELLO', 'PING', 'PONG', 'TAP', 'RESET', 'THROW', 'SYNC'];
   const actualKeys = Object.keys(MessageType);
   assert.deepStrictEqual(actualKeys.sort(), expectedKeys.sort());
 
@@ -38,6 +44,7 @@ test('MessageType is frozen with expected keys and values', () => {
   assert.strictEqual(MessageType.TAP, 'tap');
   assert.strictEqual(MessageType.RESET, 'reset');
   assert.strictEqual(MessageType.THROW, 'throw');
+  assert.strictEqual(MessageType.SYNC, 'sync');
 });
 
 test('POSE_FLOATS equals the number of PoseIndex entries', () => {
@@ -119,6 +126,104 @@ test('makePing/makePong echo semantics', () => {
 test('makeTap shape', () => {
   const tap = makeTap(2, 1500.25);
   assert.deepStrictEqual(tap, { type: MessageType.TAP, id: 2, sentAt: 1500.25 });
+});
+
+test('POSE_BYTES equals POSE_FLOATS times four', () => {
+  assert.strictEqual(POSE_BYTES, POSE_FLOATS * 4);
+});
+
+test('encodePose/decodePose round-trip preserves values to Float32 precision', () => {
+  const pose = {
+    quaternion: { x: 0.1, y: -0.2, z: 0.3, w: 0.9273618495495704 },
+    speed: 2.5,
+    seq: 42,
+    timestampMs: 123456.75
+  };
+  const encoded = encodePose(pose);
+  assert.ok(encoded instanceof Float32Array);
+  assert.strictEqual(encoded.length, POSE_FLOATS);
+
+  const decoded = decodePose(encoded);
+  assert.deepStrictEqual(decoded, {
+    quaternion: {
+      x: Math.fround(pose.quaternion.x),
+      y: Math.fround(pose.quaternion.y),
+      z: Math.fround(pose.quaternion.z),
+      w: Math.fround(pose.quaternion.w)
+    },
+    speed: Math.fround(pose.speed),
+    seq: Math.fround(pose.seq),
+    timestampMs: Math.fround(pose.timestampMs)
+  });
+});
+
+test('decodePose accepts ArrayBuffer, ArrayBufferView, and a view with a byte offset', () => {
+  const encoded = encodePose({ quaternion: { x: 0, y: 0, z: 0, w: 1 }, speed: 0, seq: 1, timestampMs: 0 });
+  assert.ok(decodePose(encoded.buffer) !== null);
+  assert.ok(decodePose(encoded) !== null);
+  assert.ok(decodePose(new DataView(encoded.buffer)) !== null);
+
+  const padded = new ArrayBuffer(POSE_BYTES + 4);
+  new Uint8Array(padded, 4).set(new Uint8Array(encoded.buffer));
+  const offsetView = new DataView(padded, 4, POSE_BYTES);
+  assert.ok(decodePose(offsetView) !== null);
+});
+
+test('decodePose rejects wrong byte lengths', () => {
+  assert.strictEqual(decodePose(new ArrayBuffer(POSE_BYTES - 4)), null);
+  assert.strictEqual(decodePose(new ArrayBuffer(POSE_BYTES + 4)), null);
+  assert.strictEqual(decodePose(new Float32Array(POSE_FLOATS - 1)), null);
+});
+
+test('decodePose rejects strings and non-ArrayBuffer inputs', () => {
+  assert.strictEqual(decodePose('not a buffer'), null);
+  assert.strictEqual(decodePose(null), null);
+  assert.strictEqual(decodePose(undefined), null);
+  assert.strictEqual(decodePose(42), null);
+});
+
+test('decodePose rejects non-finite floats', () => {
+  const floats = new Float32Array(POSE_FLOATS);
+  floats[PoseIndex.QUATERNION_W] = 1;
+  floats[PoseIndex.TIMESTAMP] = NaN;
+  assert.strictEqual(decodePose(floats), null);
+
+  const infinite = new Float32Array(POSE_FLOATS);
+  infinite[PoseIndex.QUATERNION_W] = 1;
+  infinite[PoseIndex.HAND_SPEED_PROXY] = Infinity;
+  assert.strictEqual(decodePose(infinite), null);
+});
+
+test('isPoseData true for ArrayBuffer and ArrayBufferView of POSE_BYTES', () => {
+  const encoded = encodePose({ quaternion: { x: 0, y: 0, z: 0, w: 1 }, speed: 0, seq: 1, timestampMs: 0 });
+  assert.strictEqual(isPoseData(encoded.buffer), true);
+  assert.strictEqual(isPoseData(encoded), true);
+  assert.strictEqual(isPoseData(new DataView(encoded.buffer)), true);
+  assert.strictEqual(isPoseData(new Uint8Array(POSE_BYTES)), true);
+});
+
+test('isPoseData false for wrong sizes and non-binary data', () => {
+  assert.strictEqual(isPoseData(new ArrayBuffer(POSE_BYTES - 1)), false);
+  assert.strictEqual(isPoseData(new Uint8Array(POSE_BYTES + 1)), false);
+  assert.strictEqual(isPoseData('a string'), false);
+  assert.strictEqual(isPoseData(null), false);
+  assert.strictEqual(isPoseData(undefined), false);
+  assert.strictEqual(isPoseData({ byteLength: POSE_BYTES }), false);
+});
+
+test('makeSync/syncReference round-trip', () => {
+  const qRef = { x: 0.1, y: 0.2, z: 0.3, w: 0.9 };
+  const sync = makeSync(qRef);
+  assert.deepStrictEqual(sync, { type: MessageType.SYNC, qRef });
+  assert.deepStrictEqual(syncReference(sync), qRef);
+});
+
+test('syncReference rejects malformed qRef', () => {
+  assert.strictEqual(syncReference({ type: MessageType.SYNC, qRef: { x: 0, y: 0, z: 0, w: NaN } }), null);
+  assert.strictEqual(syncReference({ type: MessageType.SYNC, qRef: { x: 0, y: 0, z: 0 } }), null);
+  assert.strictEqual(syncReference({ type: MessageType.SYNC, qRef: null }), null);
+  assert.strictEqual(syncReference({ type: MessageType.SYNC }), null);
+  assert.strictEqual(syncReference(null), null);
 });
 
 test('peerOptionsFromSearch returns {} for an empty search string', () => {

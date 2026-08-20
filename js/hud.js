@@ -9,6 +9,7 @@ export function createHud() {
   const statusDetailElement = document.querySelector('[data-status-detail]')
   const latencyElement = document.querySelector('[data-latency]')
   const tapsElement = document.querySelector('[data-taps]')
+  const handSpeedElement = document.querySelector('[data-hand-speed]')
   const pairingPanel = document.getElementById('pairing')
   const qrElement = document.getElementById('qr')
   const linkElement = document.querySelector('[data-link]')
@@ -46,6 +47,14 @@ export function createHud() {
     latencyElement.textContent = `${Math.round(rttMs)} ms`
   }
 
+  function setHandSpeed(speedMS) {
+    if (handSpeedElement === null) {
+      return
+    }
+    const speed = Number.isFinite(speedMS) ? speedMS : 0
+    handSpeedElement.textContent = `${speed.toFixed(1)} m/s`
+  }
+
   function flashTap(tapCount) {
     tapsElement.textContent = String(tapCount)
     tapFlashElement.classList.remove(TAP_FLASH_ACTIVE_CLASS)
@@ -60,5 +69,5 @@ export function createHud() {
     }, TAP_FLASH_DURATION_MS)
   }
 
-  return { setState, setPairing, setLatency, flashTap }
+  return { setState, setPairing, setLatency, setHandSpeed, flashTap }
 }

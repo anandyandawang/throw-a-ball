@@ -318,6 +318,37 @@
       color: var(--ink);
     }
 
+    .sync-block {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      gap: 10px;
+      width: 100%;
+    }
+
+    .sync-button {
+      width: 100%;
+      font-size: 1.1rem;
+      padding: 20px 26px;
+      border-radius: 18px;
+    }
+
+    .sync-note {
+      font-size: 0.82rem;
+      line-height: 1.45;
+      text-align: center;
+      color: var(--muted);
+      max-width: 34ch;
+    }
+
+    .sync-note[data-sync-state="synced"] {
+      color: #35d07f;
+    }
+
+    .sync-note[data-sync-state="rejected"] {
+      color: var(--danger);
+    }
+
     .capture-controls {
       display: flex;
       flex-direction: column;
@@ -393,7 +424,13 @@
   </section>
 
   <section class="screen" id="screen-capture" hidden>
+    <div class="sync-block">
+      <button class="action primary sync-button" id="sync-hold" type="button">sync — arm at side</button>
+      <div class="sync-note" data-sync-note>not synced yet</div>
+    </div>
     <div class="readout">
+      <div class="readout-label">hand</div>
+      <div class="readout-value" data-hand-speed>—</div>
       <div class="readout-label">quat</div>
       <div class="readout-value" data-quat>—</div>
       <div class="readout-label">gyro</div>

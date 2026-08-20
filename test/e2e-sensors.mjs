@@ -640,6 +640,11 @@ async function runSensors({ videoOutPath }) {
 
     await checks.run('denied motion permission lands on the denied screen', async () => {
       await phone.evaluate(() => {
+        window.__fullscreenRequests = 0
+        Element.prototype.requestFullscreen = function () {
+          window.__fullscreenRequests += 1
+          return Promise.resolve()
+        }
         DeviceMotionEvent.requestPermission = () => Promise.resolve('denied')
       })
       await phone.click('#start-sensors')
@@ -676,6 +681,15 @@ async function runSensors({ videoOutPath }) {
         )
       }
       return SAFETY_PHRASES.map((phrase) => `"${phrase}"`).join(' + ')
+    })
+
+    await checks.run('start tap requests fullscreen', async () => {
+      const requests = await phone.evaluate(() => window.__fullscreenRequests)
+      assertTrue(
+        typeof requests === 'number' && requests >= 1,
+        `fullscreen was requested ${requests} times, expected at least 1`
+      )
+      return `${requests} request(s), stubbed so the emulated viewport keeps its size`
     })
 
     await phone.screenshot({ path: path.join(OUT_DIR, 'sensors-safety.png') })

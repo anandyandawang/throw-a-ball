@@ -50,8 +50,8 @@ const POLL_INTERVAL_MS = 100
 
 const SIM_INTERVAL_MS = 16
 const GRAVITY_M_S2 = 9.81
-const SWING_RATE_AMPLITUDE_DEG_PER_S = 360
-const SWING_CYCLE_MS = 1200
+const SWING_RATE_AMPLITUDE_DEG_PER_S = 180
+const SWING_CYCLE_MS = 2400
 
 const AccelConvention = Object.freeze({ SPEC: 1, INVERTED: -1 })
 

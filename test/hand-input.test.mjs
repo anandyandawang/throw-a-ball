@@ -136,6 +136,20 @@ test('phone adapter forwards sync references and clears on null', () => {
   assert.deepEqual(syncs, [{ x: 0, y: 0, z: 0.5, w: 0.5 }, null, null]);
 });
 
+test('phone adapter re-anchors the seq gate on every sync', () => {
+  const adapter = createPhoneAdapter();
+  const poses = [];
+  adapter.on(HandInputEvent.POSE, (pose) => poses.push(pose));
+  adapter.start();
+  adapter.ingestPoseData(poseData(500));
+  adapter.ingestPoseData(poseData(3));
+  assert.deepEqual(poses.map((pose) => pose.seq), [500]);
+  adapter.ingestSync({ x: 0, y: 0, z: 0, w: 1 });
+  adapter.ingestPoseData(poseData(3));
+  adapter.ingestPoseData(poseData(4));
+  assert.deepEqual(poses.map((pose) => pose.seq), [500, 3, 4]);
+});
+
 test('scripted params fall back to the documented defaults', () => {
   assert.deepEqual(scriptedParams(new URLSearchParams('')), { ...ScriptedDefaults });
   assert.deepEqual(scriptedParams(null), { ...ScriptedDefaults });

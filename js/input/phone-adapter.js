@@ -56,6 +56,7 @@ export function createPhoneAdapter() {
     if (!running) {
       return
     }
+    seqGate.reset()
     emitter.emit(HandInputEvent.SYNC, { qRef: finiteQuaternionCopy(qRef) })
   }
 

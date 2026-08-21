@@ -16,6 +16,7 @@ const HandInputMode = Object.freeze({
 })
 
 const DEFAULT_TRACE_NAME = 'synthetic-swing'
+const SYNC_HINT_DETAIL = 'phone streaming — tap sync on the phone to move the arm'
 const SMOOTHING_REMAINDER_PER_SECOND = 1e-10
 const MAX_FRAME_SECONDS = 0.1
 
@@ -104,8 +105,29 @@ function createAdapter() {
 
 const adapter = createAdapter()
 
+let syncHintActive = false
+
+function showSyncHint() {
+  if (syncHintActive || inputMode !== HandInputMode.PHONE) {
+    return
+  }
+  syncHintActive = true
+  hud.setState(pairingStatus.state, SYNC_HINT_DETAIL)
+}
+
+function clearSyncHint() {
+  if (!syncHintActive) {
+    return
+  }
+  syncHintActive = false
+  hud.setState(pairingStatus.state, pairingStatus.detail)
+}
+
 adapter.on(HandInputEvent.SYNC, (event) => {
   hand.qRef = event && event.qRef ? { ...event.qRef } : null
+  if (hand.qRef !== null) {
+    clearSyncHint()
+  }
 })
 
 adapter.on(HandInputEvent.POSE, (pose) => {
@@ -117,11 +139,15 @@ adapter.on(HandInputEvent.POSE, (pose) => {
   targetQuaternion = armRotationFromPose(pose.quaternion, hand.qRef)
   hand.target = targetQuaternion
   hud.setHandSpeed(pose.speed)
+  if (hand.qRef === null) {
+    showSyncHint()
+  }
 })
 
 function setPairingStatus(state, detail) {
   pairingStatus.state = state
   pairingStatus.detail = detail
+  syncHintActive = false
   hud.setState(state, detail)
 }
 

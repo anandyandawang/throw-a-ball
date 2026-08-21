@@ -1,4 +1,5 @@
 import {
+  AccelSign,
   GyroUnit,
   applyMotionSample,
   applyOrientationSample,
@@ -8,6 +9,7 @@ import {
   pipelineSnapshot,
   recordTraceSample,
   resetTiming,
+  resolvedAccelSign,
   resolvedGyroUnit,
   rotationRateToRadPerS,
   traceSampleCount as recordedSampleCount,
@@ -200,9 +202,29 @@ function writeStoredSyncReference(qRef) {
   }
 }
 
+const ACCEL_SIGN_WAIT_MAX_SAMPLES = 60;
+
 function gyroUnitForFusion(pipeline) {
   const unit = resolvedGyroUnit(pipeline);
   return unit === GyroUnit.UNKNOWN ? GyroUnit.DEG_PER_S : unit;
+}
+
+function accelSignSettled(pipeline) {
+  return (
+    resolvedAccelSign(pipeline) !== AccelSign.UNKNOWN ||
+    pipeline.motionCount > ACCEL_SIGN_WAIT_MAX_SAMPLES
+  );
+}
+
+function specSignAccelVector(vector, accelSign) {
+  if (vector === null || accelSign !== AccelSign.INVERTED) {
+    return vector;
+  }
+  return {
+    x: vector.x === null ? null : -vector.x,
+    y: vector.y === null ? null : -vector.y,
+    z: vector.z === null ? null : -vector.z
+  };
 }
 
 function rotationRateVectorToRadPerS(rotationRate, unit) {
@@ -344,7 +366,10 @@ export function createSensorCapture(callbacks) {
       acceleration: toVector(event.acceleration)
     };
     applyMotionSample(pipeline, sample);
-    latestAccelIncludingGravity = sample.accelerationIncludingGravity;
+    latestAccelIncludingGravity = specSignAccelVector(
+      sample.accelerationIncludingGravity,
+      resolvedAccelSign(pipeline)
+    );
     if (recording) {
       recordTraceSample(recorder, sample, latestOrientationEuler);
     }
@@ -364,12 +389,16 @@ export function createSensorCapture(callbacks) {
   }
 
   function fuseLatestMotion(sample) {
+    if (!accelSignSettled(pipeline)) {
+      return;
+    }
     const unit = gyroUnitForFusion(pipeline);
+    const accelSign = resolvedAccelSign(pipeline);
     const fused = fuseMotionSample(fusion, {
       dtMs: pipeline.lastDtMs,
       gyroRadPerS: rotationRateVectorToRadPerS(sample.rotationRate, unit),
-      accel: sample.acceleration,
-      accelIncludingGravity: sample.accelerationIncludingGravity
+      accel: specSignAccelVector(sample.acceleration, accelSign),
+      accelIncludingGravity: specSignAccelVector(sample.accelerationIncludingGravity, accelSign)
     });
     if (!fused.initialized) {
       return;
@@ -458,7 +487,7 @@ export function createSensorCapture(callbacks) {
   function stopTraceAndDownload() {
     recording = false;
     const count = recordedSampleCount(recorder);
-    const json = traceToJson(recorder, forceGyroUnitDecision(pipeline));
+    const json = traceToJson(recorder, forceGyroUnitDecision(pipeline), resolvedAccelSign(pipeline));
     downloadJson(json, traceFileName());
     recorder = createTraceRecorder();
     return count;

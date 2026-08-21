@@ -4,6 +4,7 @@ import {
   DT_MIN_MS,
   DT_MAX_MS,
   DEG_PER_RAD,
+  AccelSign,
   GyroUnit,
   clampDtMs,
   quaternionFromDeviceOrientation,
@@ -13,6 +14,7 @@ import {
   applyMotionSample,
   applyOrientationSample,
   resetTiming,
+  resolvedAccelSign,
   resolvedGyroUnit,
   forceGyroUnitDecision,
   pipelineSnapshot,
@@ -362,9 +364,77 @@ test('pipelineSnapshot of a fresh pipeline is all-empty', () => {
     motionCount: 0,
     orientationCount: 0,
     gyroUnit: GyroUnit.UNKNOWN,
+    accelSign: AccelSign.UNKNOWN,
     calibrationRatio: null,
     orientationTravelDeg: 0
   });
+});
+
+function feedFlatRestStream(pipeline, gravityZ, sampleCount) {
+  for (let index = 0; index < sampleCount; index += 1) {
+    const timeStampMs = index * FRAME_MS;
+    applyOrientationSample(pipeline, { timeStampMs, alpha: 0, beta: 0, gamma: 0 });
+    applyMotionSample(
+      pipeline,
+      motionSample(timeStampMs, { x: 0, y: 0, z: 0 }, {
+        accelerationIncludingGravity: { x: 0, y: 0, z: gravityZ }
+      })
+    );
+  }
+}
+
+test('a spec-sign device resolves AccelSign.SPEC at rest', () => {
+  const pipeline = createPipeline();
+  feedFlatRestStream(pipeline, 9.81, 15);
+  assert.strictEqual(resolvedAccelSign(pipeline), AccelSign.SPEC);
+  assert.strictEqual(pipelineSnapshot(pipeline).accelSign, AccelSign.SPEC);
+});
+
+test('an inverted-sign device resolves AccelSign.INVERTED at rest', () => {
+  const pipeline = createPipeline();
+  feedFlatRestStream(pipeline, -9.81, 15);
+  assert.strictEqual(resolvedAccelSign(pipeline), AccelSign.INVERTED);
+});
+
+test('the accel sign stays unknown without orientation events', () => {
+  const pipeline = createPipeline();
+  for (let index = 0; index < 30; index += 1) {
+    applyMotionSample(
+      pipeline,
+      motionSample(index * FRAME_MS, { x: 0, y: 0, z: 0 }, {
+        accelerationIncludingGravity: { x: 0, y: 0, z: 9.81 }
+      })
+    );
+  }
+  assert.strictEqual(resolvedAccelSign(pipeline), AccelSign.UNKNOWN);
+});
+
+test('the accel sign ignores samples far from one g', () => {
+  const pipeline = createPipeline();
+  feedFlatRestStream(pipeline, 25, 30);
+  assert.strictEqual(resolvedAccelSign(pipeline), AccelSign.UNKNOWN);
+});
+
+test('a decided accel sign is sticky through later shaking', () => {
+  const pipeline = createPipeline();
+  feedFlatRestStream(pipeline, -9.81, 15);
+  feedFlatRestStream(pipeline, 9.81, 40);
+  assert.strictEqual(resolvedAccelSign(pipeline), AccelSign.INVERTED);
+});
+
+test('a tilted inverted-sign device still resolves AccelSign.INVERTED', () => {
+  const pipeline = createPipeline();
+  for (let index = 0; index < 15; index += 1) {
+    const timeStampMs = index * FRAME_MS;
+    applyOrientationSample(pipeline, { timeStampMs, alpha: 0, beta: 90, gamma: 0 });
+    applyMotionSample(
+      pipeline,
+      motionSample(timeStampMs, { x: 0, y: 0, z: 0 }, {
+        accelerationIncludingGravity: { x: 0, y: -9.81, z: 0 }
+      })
+    );
+  }
+  assert.strictEqual(resolvedAccelSign(pipeline), AccelSign.INVERTED);
 });
 
 test('trace recorder normalizes to rad/s with relative timestamps', () => {
@@ -440,6 +510,30 @@ test('traceToJson emits null timestamps when no sample carries a finite one', ()
 
 test('traceToJson of an empty recorder is an empty array', () => {
   assert.strictEqual(traceToJson(createTraceRecorder(), GyroUnit.DEG_PER_S), '[]');
+});
+
+test('traceToJson negates accel vectors for an inverted-sign device', () => {
+  const recorder = createTraceRecorder();
+  recordTraceSample(
+    recorder,
+    {
+      timeStampMs: 0,
+      rotationRate: { x: 0, y: 0, z: 1 },
+      accelerationIncludingGravity: { x: 0.5, y: -9.81, z: null },
+      acceleration: { x: -0.25, y: 0, z: 1 }
+    },
+    null
+  );
+  const inverted = JSON.parse(traceToJson(recorder, GyroUnit.RAD_PER_S, AccelSign.INVERTED))[0];
+  assert.deepStrictEqual(inverted.accelerationIncludingGravity, { x: -0.5, y: 9.81, z: null });
+  assert.deepStrictEqual(inverted.acceleration, { x: 0.25, y: 0, z: -1 });
+  assert.deepStrictEqual(inverted.rotationRate, { x: 0, y: 0, z: 1 });
+
+  const spec = JSON.parse(traceToJson(recorder, GyroUnit.RAD_PER_S, AccelSign.SPEC))[0];
+  assert.deepStrictEqual(spec.accelerationIncludingGravity, { x: 0.5, y: -9.81, z: null });
+
+  const unknown = JSON.parse(traceToJson(recorder, GyroUnit.RAD_PER_S))[0];
+  assert.deepStrictEqual(unknown.acceleration, { x: -0.25, y: 0, z: 1 });
 });
 
 test('DEG_PER_RAD converts a radian to degrees', () => {

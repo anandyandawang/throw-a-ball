@@ -8,6 +8,12 @@ export const GyroUnit = Object.freeze({
   RAD_PER_S: 'rad/s'
 });
 
+export const AccelSign = Object.freeze({
+  UNKNOWN: 0,
+  SPEC: 1,
+  INVERTED: -1
+});
+
 const MS_PER_S = 1000;
 const DT_EMA_ALPHA = 0.1;
 const TRAVEL_EPSILON = 1e-6;
@@ -15,6 +21,10 @@ const AUTO_DECISION_TRAVEL_DEG = 30;
 const FORCED_DECISION_TRAVEL_DEG = 5;
 const RAD_PER_S_RATIO = 8;
 const TRACE_SAMPLE_CAP = 20000;
+const GRAVITY_M_S2 = 9.81;
+const ACCEL_SIGN_MAGNITUDE_BAND_M_S2 = 1.5;
+const ACCEL_SIGN_MIN_SAMPLES = 12;
+const ACCEL_SIGN_MIN_AVERAGE_DOT = 0.5;
 
 function finiteOrNull(value) {
   return typeof value === 'number' && Number.isFinite(value) ? value : null;
@@ -79,6 +89,46 @@ function quaternionAboutY(halfAngleRad) {
 
 function halfAngleRadFromDeg(angleDeg) {
   return angleDeg / (2 * DEG_PER_RAD);
+}
+
+function conjugateQuaternion(q) {
+  return { x: -q.x, y: -q.y, z: -q.z, w: q.w };
+}
+
+function rotateWorldUpIntoDevice(quaternion) {
+  const rotated = multiplyQuaternions(
+    multiplyQuaternions(conjugateQuaternion(quaternion), { x: 0, y: 0, z: 1, w: 0 }),
+    quaternion
+  );
+  return { x: rotated.x, y: rotated.y, z: rotated.z };
+}
+
+function observeAccelSign(pipeline) {
+  if (pipeline.accelSign !== AccelSign.UNKNOWN || pipeline.quaternion === null) {
+    return;
+  }
+  const reading = pipeline.accelIncludingGravity;
+  const magnitude = vectorMagnitude(reading);
+  if (magnitude === null || Math.abs(magnitude - GRAVITY_M_S2) > ACCEL_SIGN_MAGNITUDE_BAND_M_S2) {
+    return;
+  }
+  const up = rotateWorldUpIntoDevice(pipeline.quaternion);
+  const dot = (up.x * reading.x + up.y * reading.y + up.z * reading.z) / magnitude;
+  pipeline.accelSignDotSum += dot;
+  pipeline.accelSignSampleCount += 1;
+  if (pipeline.accelSignSampleCount < ACCEL_SIGN_MIN_SAMPLES) {
+    return;
+  }
+  const average = pipeline.accelSignDotSum / pipeline.accelSignSampleCount;
+  if (average >= ACCEL_SIGN_MIN_AVERAGE_DOT) {
+    pipeline.accelSign = AccelSign.SPEC;
+  } else if (average <= -ACCEL_SIGN_MIN_AVERAGE_DOT) {
+    pipeline.accelSign = AccelSign.INVERTED;
+  }
+}
+
+export function resolvedAccelSign(pipeline) {
+  return pipeline.accelSign;
 }
 
 export function clampDtMs(rawDtMs) {
@@ -161,7 +211,10 @@ export function createPipeline() {
     orientationTiming: createTiming(),
     gyroTravel: 0,
     orientationTravelDeg: 0,
-    gyroUnit: GyroUnit.UNKNOWN
+    gyroUnit: GyroUnit.UNKNOWN,
+    accelSignDotSum: 0,
+    accelSignSampleCount: 0,
+    accelSign: AccelSign.UNKNOWN
   };
 }
 
@@ -170,6 +223,7 @@ export function applyMotionSample(pipeline, sample) {
   pipeline.accel = storedVector(sample.acceleration);
   pipeline.accelIncludingGravity = storedVector(sample.accelerationIncludingGravity);
   pipeline.motionCount += 1;
+  observeAccelSign(pipeline);
 
   const dtMs = advanceTiming(pipeline.motionTiming, sample.timeStampMs);
   if (dtMs !== null) {
@@ -271,6 +325,7 @@ export function pipelineSnapshot(pipeline) {
     motionCount: pipeline.motionCount,
     orientationCount: pipeline.orientationCount,
     gyroUnit,
+    accelSign: pipeline.accelSign,
     calibrationRatio: travelRatio(pipeline),
     orientationTravelDeg: pipeline.orientationTravelDeg
   };
@@ -318,13 +373,14 @@ function firstFiniteTimeStampMs(samples) {
   return null;
 }
 
-export function traceToJson(recorder, gyroUnit) {
+export function traceToJson(recorder, gyroUnit, accelSign = AccelSign.SPEC) {
   const originMs = firstFiniteTimeStampMs(recorder.samples);
+  const accelScale = accelSign === AccelSign.INVERTED ? -1 : 1;
   const samples = recorder.samples.map((sample) => ({
     timeStamp: sample.timeStampMs === null || originMs === null ? null : sample.timeStampMs - originMs,
     rotationRate: vectorToRadPerS(sample.rotationRate, gyroUnit),
-    accelerationIncludingGravity: sample.accelerationIncludingGravity,
-    acceleration: sample.acceleration,
+    accelerationIncludingGravity: scaledVector(sample.accelerationIncludingGravity, accelScale),
+    acceleration: scaledVector(sample.acceleration, accelScale),
     orientation: sample.orientation
   }));
   return JSON.stringify(samples);
